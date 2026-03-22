@@ -1,0 +1,81 @@
+---
+
+### Detalhes do Incidente
+* **Cliente impactado:** Hawk Bank
+* **SLA:** 2 horas
+* **Severidade:** P1
+* **Resolução:** Ajustada para 1 hora (conforme tempo de fechamento do incidente).
+
+---
+
+### Log de Eventos e Comunicação
+
+1707318000|k8s-prod-us-east|CRITICAL|checkout-api-pod-7x9m2|panic: runtime error: invalid memory address or nil pointer dereference
+1707318001|k8s-prod-us-east|checkout-api-pod-7x9m2|goroutine 42 [running]: [github.com/shop/checkout.(*PaymentService).Process](https://github.com/shop/checkout.(*PaymentService).Process)
+
+**[Google Chat #prod-alerts]** 09:00:02 @pagerduty-bot: 🔴 INCIDENT CREATED - #INC-8842 - Payment Service Degraded
+**[Google Chat #prod-alerts]** 09:00:03 @alice_sre: WTF, what's happening? 😰
+**[Google Chat #prod-alerts]** 09:00:05 @bob_dev: Checking now... one sec
+
+`{"ts":1707318005.123,"level":"error","msg":"Stripe API timeout","service":"payment-gateway","duration_ms":30000,"error":"context deadline exceeded","trace_id":"abc123xyz","span_id":"def456","metadata":{"retry_count":3,"last_error":"ECONNRESET"}}`
+
+Feb 07, 2024 10:00:07.891 AM UTC [ERROR] [auth-service/10.0.2.45:8080] Redis cluster: MOVED 15389 10.0.5.112:6379 - connection to node failed after 3 attempts
+Feb 07, 2024 10:00:08.112 AM UTC [WARN] [auth-service] Session validation falling back to DB - cache miss rate: 94%
+
+**[Google Chat #prod-alerts]** 09:00:10 @bob_dev: Stripe is timing out. Auth Redis is down. Cascade incoming 😬
+**[Google Chat #prod-alerts]** 09:00:12 @charlie_db: Checking Redis cluster... node 10.0.5.112 not responding to PING
+**[Google Chat #prod-alerts]** 09:00:15 @alice_sre: @david Can we failover Redis or scale auth?
+**[Google Chat #prod-alerts]** 09:00:18 @david: On it. Triggering Redis failover. ETA 2 min
+
+2024-02-07T10:00:20.456Z [FATAL] [api-gateway] Upstream request failed: checkout-api: connection refused (Connection refused)
+2024-02-07T10:00:20.789Z [FATAL] [api-gateway] Upstream request failed: auth-service: 503 Service Unavailable
+2024-02-07T10:00:21.012Z [ERROR] [api-gateway] Request id req-8842-001: POST /api/v3/checkout - 502 Bad Gateway (upstream: checkout-api)
+2024-02-07T10:00:21.234Z [ERROR] [api-gateway] Request id req-8842-002: GET /api/v3/user/session - 503 Service Unavailable (upstream: auth-service)
+
+<34>Feb  7 10:00:22 host-1 docker[1234]: {"log":"panic: nil pointer\n","stream":"stderr","time":"2024-02-07T10:00:22.100Z"}
+<34>Feb  7 10:00:22 host-1 docker[1234]: checkout-api container exited with code 2
+
+[PagerDuty] 10:00:25 - Alert: High error rate on /checkout - 92% (threshold: 5%) - **Severity: P1**
+[PagerDuty] 10:00:25 - Alert: Redis cluster health degraded - 2/6 nodes unreachable - Severity: P2
+
+**[Google Chat #prod-alerts]** 09:00:28 @charlie_db: Redis failover in progress... 45 seconds left
+**[Google Chat #prod-alerts]** 09:00:30 @bob_dev: Checkout pods are crashing in a loop. OOM? Panic?
+**[Google Chat #retail-team]** 09:00:32 @support_lead: Customers flooding support - 340 tickets in 5 min. "Checkout not working"
+**[Google Chat #prod-alerts]** 09:00:35 @alice_sre: Rolling back checkout-api to previous version. Deploying v2.14.3
+
+```json
+{
+  "timestamp": "2024-02-07T10:00:36.789Z",
+  "level": "INFO",
+  "message": "Deployment rollback initiated",
+  "namespace": "production",
+  "deployment": "checkout-api",
+  "from": "v2.15.0",
+  "to": "v2.14.3",
+  "reason": "P1 incident - nil pointer panic in payment flow",
+  "initiated_by": "alice_sre"
+}
+```
+
+10:00:40.123 [inventory-service] ERROR - GraphQL query failed: Could not connect to checkout-api: connection refused. Order reservation aborted.
+10:00:40.456 [inventory-service] WARN - Circuit breaker state: OPEN (failure threshold: 5, failures: 12)
+
+**[Google Chat #prod-alerts]** 09:00:42 @alice_sre: Rollback in progress. 2/10 pods on v2.14.3
+**[Google Chat #prod-alerts]** 09:00:45 @david: Redis failover complete. New master: 10.0.5.115
+**[Google Chat #prod-alerts]** 09:00:48 @bob_dev: Root cause - v2.15.0 had a bug. PaymentService.Process() nil check missing. PR merged to fix.
+**[Google Chat #prod-alerts]** 09:00:50 @charlie_db: Auth cache hit rate recovering: 23% -> 67%
+
+[Kubernetes Events]
+10:00:52 - Pod checkout-api-pod-7x9m2 - Failed - Exit code 2 (OOMKilled)
+10:00:53 - Deployment checkout-api - Scaling - Replicas: 10 -> 10 (rollback pods starting)
+10:00:55 - Pod checkout-api-pod-ab3cd - Running - Ready 1/1 (v2.14.3)
+10:00:58 - Service checkout-api - Endpoints updated - 4 pods ready
+
+1707318059|k8s-prod-us-east|INFO|api-gateway|First successful request to checkout-api after recovery: POST /api/v3/checkout - 201 Created - 312ms
+
+**[Google Chat #prod-alerts]** 09:01:05 @alice_sre: ✅ Checkout recovering. 6/10 pods on v2.14.3. Error rate: 45% -> 12%
+**[Google Chat #prod-alerts]** 09:01:10 @alice_sre: All pods healthy. Error rate < 1%. Closing INC-8842
+**[Google Chat #prod-alerts]** 09:01:15 @david: Post-mortem doc: https://wiki/internal/inc-8842. Thx team 🙏
+
+`{"severity":"INFO","@timestamp":"2024-02-07T10:01:20.000Z","message":"Incident resolved","service":"monitoring","incident_id":"INC-8842","duration_minutes":60,"affected_requests":1247,"affected_users_estimate":892,"root_cause":"nil pointer in checkout-api v2.15.0 PaymentService.Process()"}`
+---

@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: prod-postmortem-ai
+    ports:
+      - "8000:8000"
+    environment:
+      # We receive GOOGLE_API_KEY from host and expose it to the container.
+      # It also sets GEMINI_API_KEY as a fallback if the code expects it.
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GEMINI_API_KEY=${GOOGLE_API_KEY:-}
