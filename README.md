@@ -55,6 +55,14 @@ prod-postmortem-ai/
 
 ---
 
+## ✨ Features Exclusivas da Plataforma
+
+*   **Multimodal Vision (Evidências de Datadog)**: Arraste e solte capturas de tela dos seus dashboards de observabilidade. O Gemini fará engenharia reversa visual da falha e nosso gerador inserirá nativamente as imagens limpas no PDF final como prova do incidente.
+*   **Dynamic Executive Cards (UI Flutuante)**: Através do motor *ReportLab*, eliminamos o conceito de tabelas rígidas. O PDF ajusta fontes dinamicamente e monta uma arquitetura SaaS de fileiras duplas baseadas no que o modelo encontrou: métricas de núcleo (Impactos P1-P3, Status, MTTR) na linha de cima, e SLOs/Contagem de Erros descobertos autônomamente na linha de baixo.
+*   **Time Range Engine (Fallback Matemático)**: O SRE virtual detecta conflitos materiais. Se os logs possuírem buracos de tempo, ele utiliza janelas explícitas estipuladas pelos redatores humanos e trava firmemente as bordas de downtime, isolando MTTRs de forma determinística e previnindo alucinações cognitivas no cálculo de SLAs!
+
+---
+
 ## ⚡ Como Rodar o Projeto (Passos Rápidos)
 
 Nós preparamos tudo para que seja o mais fácil e moderno de se iniciar o serviço localmente! Siga os passos abaixo, mesmo que você não possua grandes conhecimentos de ambiente:

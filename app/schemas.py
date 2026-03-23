@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 class AnalyzeRequest(BaseModel):
@@ -10,6 +10,7 @@ class AnalyzeRequest(BaseModel):
     key_stakeholders: Optional[str] = Field(None, description="Optional key stakeholders involved")
     sla_hours: int = Field(2, description="Selected SLA boundary in hours")
     customers: Optional[str] = Field(None, description="Affected customers to highlight")
+    images: List[str] = Field(default=[], description="Base64 encoded images (e.g. Datadog screenshots)")
 
 class ExecutiveSummary(BaseModel):
     impact: str = Field(..., description="Impact of the incident")
@@ -18,11 +19,16 @@ class ExecutiveSummary(BaseModel):
 
 class Metrics(BaseModel):
     incident_title: str = Field(..., description="Short title, e.g. Checkout Service Outage")
-    total_downtime: str = Field(..., description="User friendly string, e.g., 59 seconds")
+    impact: str = Field(..., description="Event Impact, e.g. P1 - Crítico, P2 - Alto, or P3 - Médio")
+    total_downtime: str = Field(..., description="User friendly string, e.g., 59 minutes")
     downtime_minutes: int = Field(..., description="Total downtime purely in minutes as integer")
     service_status: str = Field(..., description="Current status, e.g. Resolved")
-    affected_requests: int = Field(..., description="Number of affected requests")
-    affected_users: int = Field(..., description="Number of affected users")
+    affected_customers: str = Field(default="N/A", description="Customers affected (or 'Internal')")
+    
+    affected_users: Optional[str] = Field(None, description="E.g. 4,892 (or null if not found)")
+    error_count: Optional[str] = Field(None, description="Amount of errors, e.g. 15,312 (or null)")
+    main_service: Optional[str] = Field(None, description="Main service affected e.g. checkout-api (or null)")
+    infra_slo: Optional[str] = Field(None, description="Infra SLO e.g. 99.9% (or null)")
 
 class CriticalEvent(BaseModel):
     timestamp: str = Field(..., description="Time of the event, e.g., 09:00:00")
@@ -33,3 +39,4 @@ class IncidentReport(BaseModel):
     metrics: Metrics
     timeline: List[CriticalEvent]
     next_steps: List[str] = Field(..., description="Bullet points of suggested next steps")
+    token_usage: Optional[Dict[str, int]] = Field(None, description="Token usage stats")

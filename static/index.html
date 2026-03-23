@@ -33,7 +33,7 @@
                 <div class="source-selector">
                     Source
                     <select>
-                        <option>Plain Text</option>
+                        <option style="background: #111827; color: white;">Plain Text</option>
                     </select>
                 </div>
             </div>
@@ -73,9 +73,9 @@
                     <input type="text" id="affectedServices" placeholder="e.g., API Gateway, Payment Service, Database">
                     <div class="impact-selector">
                         <span>Impact:</span>
-                        <div class="impact-pill" data-impact="Low">Low Impact</div>
-                        <div class="impact-pill" data-impact="Medium">Medium Impact</div>
-                        <div class="impact-pill" data-impact="High">High Impact</div>
+                        <div class="impact-pill" data-impact="P3 - Médio">P3 - Médio</div>
+                        <div class="impact-pill" data-impact="P2 - Alto">P2 - Alto</div>
+                        <div class="impact-pill" data-impact="P1 - Crítico">P1 - Crítico</div>
                     </div>
                     <p class="helper-text">Comma-separated services. Severity shapes Executive Summary tone.</p>
                 </div>
@@ -85,15 +85,16 @@
                 <div class="input-group">
                     <label>SLA (Service Level Agreement)</label>
                     <select id="slaHours" class="source-selector select-input" style="width: 100%; padding: 10px; font-size: 13px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); color: var(--text-main); border-radius: var(--radius);">
-                        <option value="2">2 hours</option>
-                        <option value="4">4 hours</option>
-                        <option value="6">6 hours</option>
-                        <option value="8">8 hours</option>
-                        <option value="10">10 hours</option>
-                        <option value="12">12 hours</option>
-                        <option value="24">24 hours</option>
+                        <option value="1" style="background: #111827; color: white;">1 hour</option>
+                        <option value="2" style="background: #111827; color: white;">2 hours</option>
+                        <option value="4" style="background: #111827; color: white;">4 hours</option>
+                        <option value="6" style="background: #111827; color: white;">6 hours</option>
+                        <option value="8" style="background: #111827; color: white;">8 hours</option>
+                        <option value="10" style="background: #111827; color: white;">10 hours</option>
+                        <option value="12" style="background: #111827; color: white;">12 hours</option>
+                        <option value="24" style="background: #111827; color: white;">24 hours</option>
                     </select>
-                    <p class="helper-text">Optional window. AI detects FIRST ERROR to FIRST RESOLUTION.</p>
+                    <p class="helper-text">Defines the budget threshold for MTTR validation.</p>
                 </div>
                 <div class="input-group">
                     <label>Affected Customers</label>

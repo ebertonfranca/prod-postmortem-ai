@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // State
     let selectedImpact = null;
     let attachedFilesText = "";
+    let attachedImagesBase64 = []; // Stores DataURL strings for Gemini Vision
 
     // DOM Elements
     const impactPills = document.querySelectorAll('.impact-pill');
@@ -64,21 +65,32 @@ document.addEventListener('DOMContentLoaded', () => {
             pill.textContent = file.name;
             fileList.appendChild(pill);
 
-            // Read text files
-            if (['txt', 'log', 'json', 'csv'].includes(ext)) {
-                pill.textContent = file.name + " (Reading...)";
+            if (file.type.startsWith('image/')) {
+                // Handle Images (Base64)
+                pill.textContent = file.name + " (Reading Image...)";
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    attachedImagesBase64.push(e.target.result);
+                    pill.textContent = file.name + " (Vision Ready)";
+                    pill.style.background = "rgba(16, 185, 129, 0.2)"; 
+                };
+                reader.readAsDataURL(file);
+            } else if (['txt', 'log', 'json', 'csv'].includes(ext)) {
+                // Read text files
+                pill.textContent = file.name + " (Reading Text...)";
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     attachedFilesText += `\n\n--- FILE: ${file.name} ---\n${e.target.result}`;
-                    pill.textContent = file.name + " (Processed!)";
-                    pill.style.background = "rgba(16, 185, 129, 0.2)"; // green success tint
+                    pill.textContent = file.name + " (Text Ready)";
+                    pill.style.background = "rgba(16, 185, 129, 0.2)"; 
                 };
                 reader.readAsText(file);
             } else {
-                // OCR / other mocks
+                // Unsupported / Fallback
                 setTimeout(() => {
-                    pill.textContent += " (Parsed)";
-                }, 1000);
+                    pill.textContent += " (Unsupported Type)";
+                    pill.style.background = "rgba(239, 68, 68, 0.2)"; // red error tint
+                }, 500);
             }
         });
     }
@@ -102,7 +114,8 @@ document.addEventListener('DOMContentLoaded', () => {
             impact: selectedImpact,
             key_stakeholders: keyStakeholders.value.trim() || null,
             sla_hours: parseInt(slaHours.value, 10),
-            customers: customersInput.value.trim() || null
+            customers: customersInput.value.trim() || null,
+            images: attachedImagesBase64
         };
 
         try {
@@ -142,7 +155,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            a.download = 'incident_report.pdf';
+            a.download = reportJson.metrics && reportJson.metrics.incident_title 
+                ? `Executive_Report_${reportJson.metrics.incident_title.replace(/\s+/g, '_')}.pdf`
+                : 'executive_report.pdf';
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);

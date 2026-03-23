@@ -1,51 +1,54 @@
 import os
 import json
 import logging
+import base64
+import io
 from datetime import datetime
 from fastapi import HTTPException
 import google.generativeai as genai
-from io import BytesIO
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Frame, PageTemplate
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.units import inch
 
 from app.schemas import AnalyzeRequest, IncidentReport
 
 logger = logging.getLogger(__name__)
 
-# Configure Gemini globally
 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 if api_key:
     genai.configure(api_key=api_key)
 else:
     logger.warning("Neither GEMINI_API_KEY nor GOOGLE_API_KEY found in environment.")
 
-
 async def process_incident_data(request: AnalyzeRequest) -> IncidentReport:
-    """Sends incident data to the Gemini model and returns a structured JSON."""
+    """Sends incident data to the Gemini model optionally with images."""
     if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY or GOOGLE_API_KEY not configured. Set the environment variable.")
+        raise HTTPException(status_code=500, detail="API Key not configured.")
 
     optional_context = []
-    if request.time_range:
-        optional_context.append(f"Time Range: {request.time_range}")
-    if request.affected_services:
-        optional_context.append(f"Affected Services: {request.affected_services}")
-    if request.impact:
-        optional_context.append(f"Impact Classification: {request.impact}")
-    if request.key_stakeholders:
-        optional_context.append(f"Key Stakeholders: {request.key_stakeholders}")
-    if request.customers:
-        optional_context.append(f"Affected Customers: {request.customers}")
-    
+    if request.time_range: optional_context.append(f"Time Range: {request.time_range}")
+    if request.affected_services: optional_context.append(f"Affected Services: {request.affected_services}")
+    if request.impact: optional_context.append(f"Impact Classification: {request.impact}")
+    if request.key_stakeholders: optional_context.append(f"Key Stakeholders: {request.key_stakeholders}")
+    if request.customers: optional_context.append(f"Affected Customers: {request.customers}")
     context_str = "\n".join(optional_context) if optional_context else "None provided."
 
+    images_instruction = ""
+    if request.images:
+        images_instruction = "IMPORTANT: You received screenshots (which will be organically attached to the final PDF). Read them to better understand the incident."
+        
+    time_range_instruction = ""
+    if request.time_range:
+        time_range_instruction = f"CRITICAL: The user explicitly defined the incident Time Range as '{request.time_range}'. This defines the boundaries of your analysis. IMPORTANT: `downtime_minutes` should be the actual time the service was degraded (Critical/Warning). If the logs show the system was healthy at the beginning and then crashed, downtime is only the crashed portion. HOWEVER, if the logs LACK explicit timestamps for when the failure started or ended, you MUST fully fallback to this '{request.time_range}' as the absolute truth for the start and end of the outage, assuming the entire window was degraded! Se a janela terminar e os logs não mostrarem recuperação, status é 'Ongoing'."
+
     prompt = f"""
-    You are an expert SRE. Analyze the following incident logs, team transcriptions, and context.
+    You are an expert SRE. Analyze the following incident logs, team transcriptions, and context. {images_instruction} {time_range_instruction}
     Generate a post-mortem report in STANDARD JSON format exactly matching this schema.
+    For the `metrics` section, `impact` should mirror the user input if provided, otherwise deduce between P1 - Crítico, P2 - Alto, or P3 - Médio.
+    The optional metrics (affected_users, error_count, main_service, infra_slo) MUST be extracted if they exist in the logs; otherwise emit null.
     DO NOT output markdown, ONLY pure JSON.
     
     [LOGS]
@@ -66,131 +69,210 @@ async def process_incident_data(request: AnalyzeRequest) -> IncidentReport:
         }},
         "metrics": {{
             "incident_title": "Short title, e.g. Checkout Service Outage",
+            "impact": "P1 - Crítico",
             "total_downtime": "e.g. 61 minutes",
             "downtime_minutes": 61,
             "service_status": "Resolved",
-            "affected_requests": 1247,
-            "affected_users": 892
+            "affected_customers": "Acme Corp (or 'Internal' if none)",
+            "affected_users": "892",
+            "error_count": "15000",
+            "main_service": "checkout-api",
+            "infra_slo": "99.9%"
         }},
         "timeline": [
             {{"timestamp": "09:00:00", "event": "Panic started"}}
         ],
         "next_steps": [
-            "Implement nil pointer validation",
-            "Add integration tests"
+            "Implement nil pointer validation"
         ]
     }}
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash', generation_config={"response_mime_type": "application/json"})
-        response = model.generate_content(prompt)
+        
+        # Build multipart input
+        contents = [prompt]
+        for idx, b64_img in enumerate(request.images):
+            if "," in b64_img:
+                _, b64_img = b64_img.split(",", 1)
+            try:
+                decoded = base64.b64decode(b64_img)
+                contents.append({
+                    "mime_type": "image/jpeg", # Safe fallback, Gemini handles it gracefully if png
+                    "data": decoded
+                })
+            except Exception as e:
+                logger.error(f"Error decoding image: {e}")
+                
+        response = model.generate_content(contents)
         report_data = json.loads(response.text)
+        
+        # Capture AI Token Metrics
+        if response.usage_metadata:
+            report_data['token_usage'] = {
+                "prompt_tokens": response.usage_metadata.prompt_token_count,
+                "candidates_tokens": response.usage_metadata.candidates_token_count,
+                "total_tokens": response.usage_metadata.total_token_count
+            }
+            
         return IncidentReport.model_validate(report_data)
     except Exception as e:
         logger.error(f"Error invoking Gemini: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-# --- ReportLab PDF Engine ---
 
 class ReportGenerator:
     def __init__(self, request: AnalyzeRequest):
         self.request = request
         self.styles = getSampleStyleSheet()
         
-        # Define Custom Styles to match the Premium Retro / Executive Look
+        # Custom Styles
         self.styles.add(ParagraphStyle(name='HeaderLeft', parent=self.styles['Normal'], fontSize=16, leading=20, textColor=colors.whitesmoke, fontName='Helvetica-Bold'))
         self.styles.add(ParagraphStyle(name='HeaderRight', parent=self.styles['Normal'], fontSize=10, leading=14, textColor=colors.whitesmoke, alignment=2))
-        
         self.styles.add(ParagraphStyle(name='MainTitle', parent=self.styles['Title'], fontSize=28, leading=34, textColor=colors.HexColor("#1D4ED8"), alignment=0, spaceAfter=2))
         self.styles.add(ParagraphStyle(name='SubTitle', parent=self.styles['Normal'], fontSize=16, leading=22, textColor=colors.HexColor("#4B5563"), spaceAfter=20))
-        
-        self.styles.add(ParagraphStyle(name='CardTitle', parent=self.styles['Normal'], fontSize=11, leading=14, textColor=colors.HexColor("#6B7280"), fontName='Helvetica-Bold'))
-        self.styles.add(ParagraphStyle(name='CardValue', parent=self.styles['Normal'], fontSize=22, leading=28, textColor=colors.HexColor("#111827"), fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=6))
-        self.styles.add(ParagraphStyle(name='CardValueGreen', parent=self.styles['Normal'], fontSize=22, leading=28, textColor=colors.HexColor("#10B981"), fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=6))
-        self.styles.add(ParagraphStyle(name='CardSub', parent=self.styles['Normal'], fontSize=9, leading=12, textColor=colors.HexColor("#9CA3AF")))
-        
+        self.styles.add(ParagraphStyle(name='CardTitle', parent=self.styles['Normal'], fontSize=10, leading=12, textColor=colors.HexColor("#6B7280"), fontName='Helvetica-Bold'))
+        self.styles.add(ParagraphStyle(name='CardValue', parent=self.styles['Normal'], fontSize=20, leading=26, textColor=colors.HexColor("#111827"), fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=6))
+        self.styles.add(ParagraphStyle(name='CardValueGreen', parent=self.styles['Normal'], fontSize=20, leading=26, textColor=colors.HexColor("#10B981"), fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=6))
+        self.styles.add(ParagraphStyle(name='CardValueSmall', parent=self.styles['Normal'], fontSize=13, leading=16, textColor=colors.HexColor("#111827"), fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=6))
+        self.styles.add(ParagraphStyle(name='CardValueSmallGreen', parent=self.styles['Normal'], fontSize=13, leading=16, textColor=colors.HexColor("#10B981"), fontName='Helvetica-Bold', spaceBefore=6, spaceAfter=6))
+        self.styles.add(ParagraphStyle(name='CardSub', parent=self.styles['Normal'], fontSize=8, leading=10, textColor=colors.HexColor("#9CA3AF")))
         self.styles.add(ParagraphStyle(name='SectionTitle', parent=self.styles['Heading2'], fontSize=16, leading=20, textColor=colors.HexColor("#1D4ED8"), spaceAfter=10))
         self.styles.add(ParagraphStyle(name='ExecText', parent=self.styles['Normal'], fontSize=11, leading=16, textColor=colors.HexColor("#374151"), spaceAfter=14))
-        
         self.styles.add(ParagraphStyle(name='SlaPercent', parent=self.styles['Normal'], fontSize=34, leading=40, textColor=colors.HexColor("#111827"), fontName='Helvetica-Bold', alignment=1))
         self.styles.add(ParagraphStyle(name='SlaLabel', parent=self.styles['Normal'], fontSize=10, leading=14, textColor=colors.HexColor("#6B7280"), fontName='Helvetica-Bold', alignment=1, spaceAfter=15))
         self.styles.add(ParagraphStyle(name='NextStepBullet', parent=self.styles['Normal'], fontSize=10, leading=14, textColor=colors.HexColor("#4B5563"), spaceAfter=8))
-
+        self.styles.add(ParagraphStyle(name='TokenFooter', parent=self.styles['Normal'], fontSize=8, leading=10, textColor=colors.HexColor("#9CA3AF"), alignment=1))
+        self.styles.add(ParagraphStyle(name='TimelineHeader', parent=self.styles['Normal'], fontSize=11, leading=14, textColor=colors.HexColor("#374151"), fontName='Helvetica-Bold'))
+        self.styles.add(ParagraphStyle(name='TimelineText', parent=self.styles['Normal'], fontSize=10, leading=14, textColor=colors.HexColor("#374151")))
 
     def _header_footer(self, canvas, doc):
         canvas.saveState()
-        # Draw Dark Top Header background
         canvas.setFillColor(colors.HexColor("#0F172A"))
         canvas.rect(0, 720, letter[0], 100, fill=1, stroke=0)
         
-        # Draw Header Text
         canvas.setFillColor(colors.whitesmoke)
         canvas.setFont("Helvetica-Bold", 18)
         canvas.drawString(40, 755, "PROD POST-MORTEM AI")
         canvas.setFont("Helvetica", 12)
         canvas.drawString(275, 755, "EXECUTIVE REPORT")
         
-        # Right aligned
         canvas.setFont("Helvetica-Bold", 12)
         canvas.drawRightString(letter[0] - 40, 765, "CONFIDENTIAL")
         canvas.setFont("Helvetica", 10)
         canvas.drawRightString(letter[0] - 40, 750, f"Generated: {datetime.now().strftime('%B %d, %Y')}")
-        
         canvas.restoreState()
 
     def generate_pdf(self, report: IncidentReport) -> bytes:
-        buffer = BytesIO()
+        buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=85, bottomMargin=40)
         elements = []
 
-        # 1. Main Titles
         elements.append(Paragraph("Incident Report", self.styles['MainTitle']))
         elements.append(Paragraph(report.metrics.incident_title, self.styles['SubTitle']))
         elements.append(Spacer(1, 10))
 
-        # 2. Big Numbers Cards (Retro style borders)
-        cards_data = []
+        # Cards - Modern Floating Style
         metrics = report.metrics
+        usable_width = letter[0] - 80
+        num_cards = 4 if self.request.customers else 3
+        gap = 10
+        card_w = (usable_width - (gap * (num_cards - 1))) / num_cards
 
-        def create_card(title, value, sub, color_val=False):
-            val_style = self.styles['CardValueGreen'] if color_val else self.styles['CardValue']
-            return [
-                Paragraph(title, self.styles['CardTitle']),
-                Paragraph(value, val_style),
-                Paragraph(sub, self.styles['CardSub'])
-            ]
+        def get_value_style(val_str, is_green):
+            if len(str(val_str)) > 14:
+                return self.styles['CardValueSmallGreen'] if is_green else self.styles['CardValueSmall']
+            return self.styles['CardValueGreen'] if is_green else self.styles['CardValue']
 
-        card1 = create_card("Affected Users", f"{metrics.affected_users:,}", "Users impacted during incident")
-        card2 = create_card("Downtime / MTTR", f"{metrics.total_downtime}", "Total service disruption time")
-        card3 = create_card("Service Status", f"{metrics.service_status}", "Current status", color_val=(metrics.service_status.lower()=="resolved"))
-        row1 = [card1, card2, card3]
-        
-        # Customers block if provided
-        if self.request.customers:
-            card4 = create_card("Affected Customers", self.request.customers, "Identified client blast radius")
-            row1.append(card4)
+        def create_modern_card(title, value, sub, is_green=False):
+            val_style = get_value_style(value, is_green)
+            data = [[
+                [Paragraph(title, self.styles['CardTitle']),
+                 Spacer(1, 4),
+                 Paragraph(value, val_style),
+                 Spacer(1, 4),
+                 Paragraph(sub, self.styles['CardSub'])]
+            ]]
+            t = Table(data, colWidths=[card_w])
+            t.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")), # Very light gray
+                ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor("#E2E8F0")),
+                ('TOPPADDING', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+                ('LEFTPADDING', (0,0), (-1,-1), 10),
+                ('RIGHTPADDING', (0,0), (-1,-1), 10),
+            ]))
+            return t
 
-        card_width = (letter[0] - 80) / len(row1)
-        cards_table = Table([row1], colWidths=[card_width]*len(row1))
-        
-        card_style = [
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOX', (0, 0), (0, 0), 0.5, colors.HexColor("#D1D5DB")),
-            ('BOX', (1, 0), (1, 0), 0.5, colors.HexColor("#D1D5DB")),
-            ('BOX', (2, 0), (2, 0), 0.5, colors.HexColor("#D1D5DB")),
-            ('PADDING', (0, 0), (-1, -1), 12),
+        row1_cards = [
+            create_modern_card("Impact", f"{metrics.impact}", "Incident severity", is_green=False),
+            create_modern_card("Downtime / MTTR", f"{metrics.total_downtime}", "Total disruption time"),
+            create_modern_card("Service Status", f"{metrics.service_status}", "Current status", is_green=(metrics.service_status.lower()=="resolved")),
+            create_modern_card("Affected Customers", f"{self.request.customers if self.request.customers else metrics.affected_customers}", "Identified client radius")
         ]
-        if len(row1) == 4:
-            card_style.append(('BOX', (3, 0), (3, 0), 0.5, colors.HexColor("#D1D5DB")))
-            
-        # Add gaps between cards using frame inner spacing via Table nesting, or just draw basic grid.
-        # Spacing is best achieved by empty columns, but for simplicity we draw inner grids light
-        cards_table.setStyle(TableStyle(card_style))
-        elements.append(cards_table)
-        elements.append(Spacer(1, 15))
 
-        # 3. Two columns: Left (Execution Summary Impact) | Right (SLA)
-        # Calculate SLA:
+        def pack_cards(cards_list):
+            r_cells = []
+            col_widths = []
+            for i, card in enumerate(cards_list):
+                r_cells.append(card)
+                col_widths.append(card_w)
+                if i < len(cards_list) - 1:
+                    r_cells.append("")
+                    col_widths.append(gap)
+            t = Table([r_cells], colWidths=col_widths)
+            t.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('PADDING', (0, 0), (-1, -1), 0),
+            ]))
+            return t
+
+        elements.append(pack_cards(row1_cards))
+        elements.append(Spacer(1, 10))
+
+        # Optional Row 2
+        row2_cards = []
+        if metrics.affected_users:
+            row2_cards.append(create_modern_card("Affected Users", f"{metrics.affected_users}", "Estimated users impacted"))
+        if metrics.error_count:
+            row2_cards.append(create_modern_card("Error Count", f"{metrics.error_count}", "Identified errors"))
+        if metrics.main_service:
+            row2_cards.append(create_modern_card("Main Service", f"{metrics.main_service}", "Primary impacted system"))
+        if metrics.infra_slo:
+            row2_cards.append(create_modern_card("Infra SLO", f"{metrics.infra_slo}", "Infrastructure SLO limit"))
+            
+        if row2_cards:
+            for c in row2_cards:
+                c._colWidths = [card_w]
+            elements.append(pack_cards(row2_cards))
+            elements.append(Spacer(1, 20))
+        else:
+            elements.append(Spacer(1, 10))
+
+        # Directly insert User provided Datadog/Monitor Images if present
+        if self.request.images:
+            from reportlab.lib.utils import ImageReader
+            for b64 in self.request.images:
+                try:
+                    if "," in b64:
+                        _, b64 = b64.split(",", 1)
+                    img_data = base64.b64decode(b64)
+                    img_buffer = io.BytesIO(img_data)
+                    rp_img = ImageReader(img_buffer)
+                    iw, ih = rp_img.getSize()
+                    aspect = ih / float(iw)
+                    draw_w = min(usable_width, iw) # don't blow up small pics
+                    if iw > usable_width: draw_w = usable_width
+                    draw_h = draw_w * aspect
+                    
+                    elements.append(Paragraph("Monitoring Evidence", self.styles['SectionTitle']))
+                    elements.append(RLImage(img_buffer, width=draw_w, height=draw_h))
+                    elements.append(Spacer(1, 20))
+                    break # Only stamp the FIRST image onto the executive report
+                except Exception as e:
+                    logger.error(f"Failed to embed user image: {e}")
+
+        # Two Columns Split (Executive Summary + SLA)
         sla_hours = self.request.sla_hours
         sla_max_minutes = sla_hours * 60
         actual_minutes = metrics.downtime_minutes
@@ -207,12 +289,11 @@ class ReportGenerator:
         right_col = [
             Spacer(1, 5),
             sla_circle_val,
-            Paragraph("SLA BUDGET USED", self.styles['SlaLabel'])
+            Paragraph("SLA BUDGET USED", self.styles['SlaLabel']),
+            Paragraph(f"({sla_hours}h Threshold Target)", self.styles['TokenFooter'])
         ]
         
-        col_width1 = 360
-        col_width2 = 160
-        summary_table = Table([[left_col, right_col]], colWidths=[col_width1, col_width2])
+        summary_table = Table([[left_col, right_col]], colWidths=[360, 160])
         summary_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('ALIGN', (1, 0), (1, 0), 'CENTER'),
@@ -224,7 +305,6 @@ class ReportGenerator:
         elements.append(summary_table)
         elements.append(Spacer(1, 15))
         
-        # Rest of Executive Summary (extracted to avoid page-break jumps on long texts)
         elements.append(Paragraph(f"<b>Root Cause:</b> {report.executive_summary.root_cause}", self.styles['ExecText']))
         elements.append(Paragraph(f"<b>Resolution:</b> {report.executive_summary.resolution}", self.styles['ExecText']))
         elements.append(Spacer(1, 15))
@@ -235,25 +315,36 @@ class ReportGenerator:
         
         elements.append(Spacer(1, 20))
 
-        # 4. Timeline
         elements.append(Paragraph("Team Response Timeline", self.styles['SectionTitle']))
-        timeline_data = [["Timestamp", "Decision / Event"]]
+        timeline_data = [[
+            Paragraph("Timestamp", self.styles['TimelineHeader']), 
+            Paragraph("Decision / Event", self.styles['TimelineHeader'])
+        ]]
         for event in report.timeline:
-            timeline_data.append([event.timestamp, event.event])
+            timeline_data.append([
+                Paragraph(event.timestamp, self.styles['TimelineText']), 
+                Paragraph(event.event, self.styles['TimelineText'])
+            ])
 
         timeline_table = Table(timeline_data, colWidths=[120, 400])
         timeline_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#F3F4F6")),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#374151")),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
         elements.append(timeline_table)
+        
+        # Token Telemetry Header
+        if report.token_usage:
+            elements.append(Spacer(1, 20))
+            usg = report.token_usage
+            elements.append(Paragraph(f"Gemini AI Telemetry: {usg.get('total_tokens', 0):,} tokens total "
+                                    f"({usg.get('prompt_tokens', 0):,} prompt / {usg.get('candidates_tokens', 0):,} output)", 
+                                    self.styles['TokenFooter']))
 
-        # Build PDF
         doc.build(elements, onFirstPage=self._header_footer, onLaterPages=self._header_footer)
         pdf_bytes = buffer.getvalue()
         buffer.close()

@@ -4,7 +4,7 @@
 * **Cliente impactado:** Hawk Bank
 * **SLA:** 2 horas
 * **Severidade:** P1
-* **Resolução:** Ajustada para 1 hora (conforme tempo de fechamento do incidente).
+* **Resolução:** Resolvida em 1 hora e 30 minutos (iniciado às 09:00 e finalizado às 10:30).
 
 ---
 
@@ -60,22 +60,22 @@ Feb 07, 2024 10:00:08.112 AM UTC [WARN] [auth-service] Session validation fallin
 10:00:40.123 [inventory-service] ERROR - GraphQL query failed: Could not connect to checkout-api: connection refused. Order reservation aborted.
 10:00:40.456 [inventory-service] WARN - Circuit breaker state: OPEN (failure threshold: 5, failures: 12)
 
-**[Google Chat #prod-alerts]** 09:00:42 @alice_sre: Rollback in progress. 2/10 pods on v2.14.3
-**[Google Chat #prod-alerts]** 09:00:45 @david: Redis failover complete. New master: 10.0.5.115
-**[Google Chat #prod-alerts]** 09:00:48 @bob_dev: Root cause - v2.15.0 had a bug. PaymentService.Process() nil check missing. PR merged to fix.
-**[Google Chat #prod-alerts]** 09:00:50 @charlie_db: Auth cache hit rate recovering: 23% -> 67%
+**[Google Chat #prod-alerts]** 10:20:42 @alice_sre: Rollback in progress. 2/10 pods on v2.14.3
+**[Google Chat #prod-alerts]** 10:22:45 @david: Redis failover complete. New master: 10.0.5.115
+**[Google Chat #prod-alerts]** 10:25:48 @bob_dev: Root cause - v2.15.0 had a bug. PaymentService.Process() nil check missing. PR merged to fix.
+**[Google Chat #prod-alerts]** 10:27:50 @charlie_db: Auth cache hit rate recovering: 23% -> 67%
 
 [Kubernetes Events]
-10:00:52 - Pod checkout-api-pod-7x9m2 - Failed - Exit code 2 (OOMKilled)
-10:00:53 - Deployment checkout-api - Scaling - Replicas: 10 -> 10 (rollback pods starting)
-10:00:55 - Pod checkout-api-pod-ab3cd - Running - Ready 1/1 (v2.14.3)
-10:00:58 - Service checkout-api - Endpoints updated - 4 pods ready
+10:28:52 - Pod checkout-api-pod-7x9m2 - Failed - Exit code 2 (OOMKilled)
+10:28:53 - Deployment checkout-api - Scaling - Replicas: 10 -> 10 (rollback pods starting)
+10:28:55 - Pod checkout-api-pod-ab3cd - Running - Ready 1/1 (v2.14.3)
+10:28:58 - Service checkout-api - Endpoints updated - 4 pods ready
 
-1707318059|k8s-prod-us-east|INFO|api-gateway|First successful request to checkout-api after recovery: POST /api/v3/checkout - 201 Created - 312ms
+1707323339|k8s-prod-us-east|INFO|api-gateway|First successful request to checkout-api after recovery: POST /api/v3/checkout - 201 Created - 312ms
 
-**[Google Chat #prod-alerts]** 09:01:05 @alice_sre: ✅ Checkout recovering. 6/10 pods on v2.14.3. Error rate: 45% -> 12%
-**[Google Chat #prod-alerts]** 09:01:10 @alice_sre: All pods healthy. Error rate < 1%. Closing INC-8842
-**[Google Chat #prod-alerts]** 09:01:15 @david: Post-mortem doc: https://wiki/internal/inc-8842. Thx team 🙏
+**[Google Chat #prod-alerts]** 10:29:05 @alice_sre: ✅ Checkout recovering. 6/10 pods on v2.14.3. Error rate: 45% -> 12%
+**[Google Chat #prod-alerts]** 10:30:00 @alice_sre: All pods healthy. Error rate < 1%. Closing INC-8842
+**[Google Chat #prod-alerts]** 10:30:15 @david: Post-mortem doc: https://wiki/internal/inc-8842. Thx team 🙏
 
-`{"severity":"INFO","@timestamp":"2024-02-07T10:01:20.000Z","message":"Incident resolved","service":"monitoring","incident_id":"INC-8842","duration_minutes":60,"affected_requests":1247,"affected_users_estimate":892,"root_cause":"nil pointer in checkout-api v2.15.0 PaymentService.Process()"}`
+`{"severity":"INFO","@timestamp":"2024-02-07T10:30:20.000Z","message":"Incident resolved","service":"monitoring","incident_id":"INC-8842","duration_minutes":90,"affected_requests":8247,"affected_users_estimate":4892,"root_cause":"nil pointer in checkout-api v2.15.0 PaymentService.Process()"}`
 ---
