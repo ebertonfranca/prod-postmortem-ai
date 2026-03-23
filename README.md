@@ -12,45 +12,51 @@ Utilizamos uma organização rigorosamente isolada, separando o Servidor (Backen
 
 ```mermaid
 graph TD
-    User([Usuário no Navegador]) -->|GET / | FastAPI[FastAPI]
-    User -->|Envia Logs Web Form POST /analyze| AnalyzeEndpoint[app/api/endpoints.py]
-    AnalyzeEndpoint -->|Validação de Formato| Schemas[app/schemas.py]
-    Schemas -.-> Pydantic[Modelos Pydantic]
-    AnalyzeEndpoint -->|Manda o payload de texto para| Gemini[Google Gemini LLM GenAI]
-    Gemini -->|Retorna JSON Estruturado de SRE| AnalyzeEndpoint
-    AnalyzeEndpoint -->|Gera visualização na UI| User
-    
-    User -->|Requisita Download PDF POST /export-pdf| ExportEndpoint[app/api/endpoints.py]
-    ExportEndpoint -->|Gera Artefatos| Services[app/services.py]
-    Services -.-> ReportLab[ReportLab Engine]
-    ReportLab -->|Retorna Blob PDF via Buffer| ExportEndpoint
-    ExportEndpoint -->|Força Download do Arquivo| User
-    
+    User([Usuário]) -->|Logs + Imagens| App[FastAPI / App]
+    App -->|Análise Multimodal| Gemini[Google Gemini AI]
+    Gemini -->|JSON SRE| App
+    App -->|Motor ReportLab| PDF([Post-Mortem PDF])
+    PDF -->|Download| User
+
+    subgraph "Camada de Inteligência"
+    App
+    Skills[(Prompt Skills)]
+    end
+    App --- Skills
+
     classDef main fill:#3b82f6,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef sub fill:#1e293b,stroke:#fff,color:#fff;
-    class FastAPI main;
-    class AnalyzeEndpoint,ExportEndpoint,Schemas,Services sub;
+    classDef alt fill:#1e293b,stroke:#fff,color:#fff;
+    class App,Gemini,PDF main;
+    class Skills alt;
 ```
 
 A estrutura interna no seu disco é esta base limpa e escalável:
 
 ```text
 prod-postmortem-ai/
-├── app/                  # Núcleo duro lógico da API (Tudo de Python)
-│   ├── main.py           # O Hub Central do app, middlewares e injeções de routes
-│   ├── api/              # Rotas divididas
-│   │   └── endpoints.py  # Manipuladores de requisição
-│   ├── schemas/          # Estruturas Pydantic (Validação Severa e Typos seguros)
-│   └── services/         # Handlers externos: Processamento de IA e Geração complexa de PDF
+├── app/                  # Núcleo lógico da API
+│   ├── main.py           # Hub central e middleware
+│   ├── api/              # Rotas da API
+│   │   ├── __init__.py
+│   │   └── endpoints.py  # Handlers de requisição
+│   ├── schemas.py        # Validação com Pydantic
+│   ├── services.py       # Lógica de IA e PDF
+│   ├── skills/           # Prompts e conhecimentos externos (Skills)
+│   │   ├── sre_report_skill.md
+│   │   └── ...
+│   └── __init__.py
 │
-├── static/               # Assets Visuais (Nosso Frontend Vanilla Elegante Ultra-Premium UI)
+├── static/               # Assets do Frontend
 │   ├── index.html
 │   ├── style.css
-│   └── script.js
+│   ├── script.js
+│   └── example_logs.txt  # Exemplo de logs para teste
 │
-├── docker-compose.yml    # Orquestração local segura
-├── Dockerfile            # Configurações do container com 'uv' (Fast Init)
-└── README.md             # Esta super documentação
+├── docker-compose.yml    # Orquestração Docker
+├── Dockerfile            # Imagem do container
+├── pyproject.toml        # Dependências do projeto
+├── uv.lock               # Lockfile do 'uv'
+└── README.md             # Esta documentação
 ```
 
 ---
