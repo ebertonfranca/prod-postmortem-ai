@@ -59,7 +59,7 @@ prod-postmortem-ai/
 
 *   **Multimodal Vision (Evidências de Datadog)**: Arraste e solte capturas de tela dos seus dashboards de observabilidade. O Gemini fará engenharia reversa visual da falha e nosso gerador inserirá nativamente as imagens limpas no PDF final como prova do incidente.
 *   **Dynamic Executive Cards (UI Flutuante)**: Através do motor *ReportLab*, eliminamos o conceito de tabelas rígidas. O PDF ajusta fontes dinamicamente e monta uma arquitetura SaaS de fileiras duplas baseadas no que o modelo encontrou: métricas de núcleo (Impactos P1-P3, Status, MTTR) na linha de cima, e SLOs/Contagem de Erros descobertos autônomamente na linha de baixo.
-*   **Time Range Engine (Fallback Matemático)**: O SRE virtual detecta conflitos materiais. Se os logs possuírem buracos de tempo, ele utiliza janelas explícitas estipuladas pelos redatores humanos e trava firmemente as bordas de downtime, isolando MTTRs de forma determinística e previnindo alucinações cognitivas no cálculo de SLAs!
+*   **Time Range Engine (Fallback Matemático)**: O SRE virtual detecta conflitos materiais. Se os logs possuírem buracos de tempo, ele utiliza janelas explícitas estipuladas pelos redatores humanos e trava firmemente as bordas de downtime, isolando MTTRs de forma determinística e prevenindo alucinações cognitivas no cálculo de SLAs!
 
 ---
 
@@ -77,7 +77,7 @@ GOOGLE_API_KEY=AI...sua_chave_linda_aqui
 ---
 
 ### Execução via Docker (Opção Mais Simples - Recomendado)
-*Para quem quer 0 esforço de instalação (Requer apenas [Docker](https://www.docker.com/) instado no seu PC):*
+*Para quem quer 0 esforço de instalação (Requer apenas [Docker](https://www.docker.com/) instalado no seu PC):*
 
 1. Abra seu terminal de comando e garanta que você está na pasta do projeto.
 2. Digite este comando único e dê enter:
@@ -94,8 +94,22 @@ docker compose up -d --build
 1. Instale o gerenciador ultrarápido oficial (`uv`):
    *(Unix/Mac)* `curl -LsSf https://astral.sh/uv/install.sh | sh`
    *(Windows)* `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-2. Dentro da pasta, inicie o app sem precisar ativar source manuais:
+2. Dentro da pasta, inicie o app sem precisar ativar o ambiente virtual manualmente:
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 3. O servidor vai abrir! Vá em **http://localhost:8000** no seu próprio browser e divirta-se.
+
+---
+
+## 🛠️ Solução de Problemas (Troubleshooting)
+
+### Docker não encontrado no WSL 2 (Windows)
+Se você utiliza Windows com WSL (Subssistema Windows para Linux) e, ao rodar o comando docker, receber o erro `The command 'docker' could not be found in this WSL 2 distro`, você precisa ativar a integração do Docker Desktop com o seu ambiente Linux:
+
+1. Abra o **Docker Desktop** no Windows.
+2. Acesse as **Settings** (ícone de engrenagem no canto superior direito).
+3. Vá em **Resources > WSL Integration**.
+4. Ative a opção **"Enable integration with my default WSL distro"** e marque a caixa da sua distribuição Linux (ex: *Ubuntu*).
+5. Clique em **Apply & restart**.
+6. Feche e abra o seu terminal do WSL novamente. Agora o comando rodará perfeitamente e com alta performance de leitura de arquivos!

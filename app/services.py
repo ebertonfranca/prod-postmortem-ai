@@ -44,49 +44,22 @@ async def process_incident_data(request: AnalyzeRequest) -> IncidentReport:
     if request.time_range:
         time_range_instruction = f"CRITICAL: The user explicitly defined the incident Time Range as '{request.time_range}'. This defines the boundaries of your analysis. IMPORTANT: `downtime_minutes` should be the actual time the service was degraded (Critical/Warning). If the logs show the system was healthy at the beginning and then crashed, downtime is only the crashed portion. HOWEVER, if the logs LACK explicit timestamps for when the failure started or ended, you MUST fully fallback to this '{request.time_range}' as the absolute truth for the start and end of the outage, assuming the entire window was degraded! Se a janela terminar e os logs não mostrarem recuperação, status é 'Ongoing'."
 
-    prompt = f"""
-    You are an expert SRE. Analyze the following incident logs, team transcriptions, and context. {images_instruction} {time_range_instruction}
-    Generate a post-mortem report in STANDARD JSON format exactly matching this schema.
-    For the `metrics` section, `impact` should mirror the user input if provided, otherwise deduce between P1 - Crítico, P2 - Alto, or P3 - Médio.
-    The optional metrics (affected_users, error_count, main_service, infra_slo) MUST be extracted if they exist in the logs; otherwise emit null.
-    DO NOT output markdown, ONLY pure JSON.
-    
-    [LOGS]
-    {request.logs}
-    
-    [TRANSCRIPTION]
-    {request.transcription}
+    # Load externalized prompt skill
+    skill_path = os.path.join(os.path.dirname(__file__), "skills", "sre_report_skill.md")
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            prompt_template = f.read()
+    except Exception as e:
+        logger.error(f"Failed to load prompt skill at {skill_path}: {e}")
+        # Severe fallback if file is missing
+        prompt_template = "Analyze logs and return JSON. [LOGS]\n{logs}"
 
-    [ADDITIONAL CONTEXT]
-    {context_str}
+    prompt = prompt_template.replace("{logs}", request.logs)\
+                            .replace("{transcription}", request.transcription or "None provided.")\
+                            .replace("{context_str}", context_str)\
+                            .replace("{images_instruction}", images_instruction)\
+                            .replace("{time_range_instruction}", time_range_instruction)
 
-    Required JSON structure:
-    {{
-        "executive_summary": {{
-            "impact": "description of the impact",
-            "root_cause": "description of the root cause",
-            "resolution": "description of how it was resolved"
-        }},
-        "metrics": {{
-            "incident_title": "Short title, e.g. Checkout Service Outage",
-            "impact": "P1 - Crítico",
-            "total_downtime": "e.g. 61 minutes",
-            "downtime_minutes": 61,
-            "service_status": "Resolved",
-            "affected_customers": "Acme Corp (or 'Internal' if none)",
-            "affected_users": "892",
-            "error_count": "15000",
-            "main_service": "checkout-api",
-            "infra_slo": "99.9%"
-        }},
-        "timeline": [
-            {{"timestamp": "09:00:00", "event": "Panic started"}}
-        ],
-        "next_steps": [
-            "Implement nil pointer validation"
-        ]
-    }}
-    """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash', generation_config={"response_mime_type": "application/json"})
         
@@ -98,7 +71,7 @@ async def process_incident_data(request: AnalyzeRequest) -> IncidentReport:
             try:
                 decoded = base64.b64decode(b64_img)
                 contents.append({
-                    "mime_type": "image/jpeg", # Safe fallback, Gemini handles it gracefully if png
+                    "mime_type": "image/jpeg", # Safe fallback
                     "data": decoded
                 })
             except Exception as e:
